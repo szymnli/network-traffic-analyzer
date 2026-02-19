@@ -13,20 +13,16 @@ from typing import Dict, List, Optional
 import socket
 
 logging.basicConfig(
-        level = logging.INFO,
-        format = '%(asctime)s - %(leveltime)s - %(message)s'
-        )
+    level=logging.INFO, format="%(asctime)s - %(leveltime)s - %(message)s"
+)
 logger = logging.getlogger(__name__)
+
 
 class PacketProcessor:
     """Process and analyze network"""
 
     def __init__(self):
-        self.protocol_map = {
-                1: 'ICMP',
-                6: 'TCP',
-                17: 'UDP'
-                }
+        self.protocol_map = {1: "ICMP", 6: "TCP", 17: "UDP"}
         self.packet_data = []
         self.start_time = datetime.now()
         self.packet_count = 0
@@ -34,7 +30,7 @@ class PacketProcessor:
 
     def get_protocol_name(self, protocol_num: int) -> str:
         """Convert protocol number to name"""
-        return self.protocol_map.get(protocol_num, f'OTHER({protocol_num})')
+        return self.protocol_map.get(protocol_num, f"OTHER({protocol_num})")
 
     def process_packet(self, packet) -> None:
         """Process a single packet and extract relevant information"""
@@ -42,28 +38,34 @@ class PacketProcessor:
             if IP in packet:
                 with self.lock:
                     packet_info = {
-                            'timestamp': datetime.now(),
-                            'source': packet[IP].src,
-                            'destination': packet[IP].dst,
-                            'protocol': self.get_protocol_name(packet[IP].proto),
-                            'size': len(packet),
-                            'time_relative': (datetime.now() - self.start_time).total_seconds()
-                            }
+                        "timestamp": datetime.now(),
+                        "source": packet[IP].src,
+                        "destination": packet[IP].dst,
+                        "protocol": self.get_protocol_name(packet[IP].proto),
+                        "size": len(packet),
+                        "time_relative": (
+                            datetime.now() - self.start_time
+                        ).total_seconds(),
+                    }
 
                     # Add TCP-specific information
                     if TCP in packet:
-                        packet_info.update({
-                            'src_port': packet[TCP].sport,
-                            'dst_port': packet[TCP].dport,
-                            'tcp_flags': packet[TCP].flags
-                            })
+                        packet_info.update(
+                            {
+                                "src_port": packet[TCP].sport,
+                                "dst_port": packet[TCP].dport,
+                                "tcp_flags": packet[TCP].flags,
+                            }
+                        )
 
                     # Add UDP-specific information
                     elif UDP in packet:
-                        packet_info.update({
-                            'src_port': packet[UDP].sport,
-                            'dst_port': packet[UDP].dport
-                            })
+                        packet_info.update(
+                            {
+                                "src_port": packet[UDP].sport,
+                                "dst_port": packet[UDP].dport,
+                            }
+                        )
 
                     self.packet_data.append(packet_info)
                     self.packet_count += 1
@@ -79,3 +81,47 @@ class PacketProcessor:
         """Convert packet data to pandas DataFrame"""
         with self.lock:
             return pd.DataFrame(self.packet_data)
+
+
+def create_visualizations(df: pd.DataFrame):
+    """Create all dashboard visualizations"""
+    if len(df) > 0:
+        # Protocol distribution
+        protocol_counts = df["protocol"].value_counts()
+        fig_protocol = px.pie(
+            values=protocol_counts.values,
+            names=protocol_counts.index,
+            title="Protocol Distribution",
+        )
+        st.plotly_chart(fig_protocol, use_container_width=True)
+
+        # Packets timeline
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df_grouped = df.groupby(df["timestamp"].dt.floor("S")).size()
+        fig_timeline = px.line(
+            x=df_grouped.index, y=df_grouped.values, title="Packets per Second"
+        )
+        st.plotly_chart(fig_timeline, use_container_width=True)
+
+        # Top source IPs
+        top_sources = df["source"].value_counts().head(10)
+        fig_sources = px.bar(
+            x=top_sources.index, y=top_sources.values, title="Top Source IP Addresses"
+        )
+        st.plotly_chart(fig_sources, use_container_width=True)
+
+
+def start_packet_capture():
+    """Start packet capture in a separate thread"""
+    processor = PacketProcessor()
+
+    def capture_packets():
+        sniff(prn=processor.processor_packet, store=False)
+
+    capture_thread = threading.Thread(target=capture_packets, daemon=True)
+    capture_thread.start()
+
+    return processor
+
+
+
